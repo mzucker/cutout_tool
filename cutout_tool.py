@@ -7,7 +7,6 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
-import cairo
 import svgelements
 import triangle as tr
 import shapely.geometry as sgeom
@@ -653,33 +652,36 @@ def make_trimmed_polygon(contour, cutting_polygons):
 ######################################################################
 # make a PDF for laser cutting
 
-def dump_pdf(filename, sx, sy, polygon):
+def dump_svg(filename, sx, sy, polygon):
 
-    scl = 1.0/UNITS['pt']
+    sx = int(np.ceil(sx))
+    sy = int(np.ceil(sy))
 
-    surface = cairo.PDFSurface(filename, 2*sx*scl, 2*sy*scl)
-    ctx = cairo.Context(surface)
+    w = 2*sx
+    h = 2*sy
 
-    polygon = (polygon*[1, -1] + [sx, sy])*scl
+    polygon = (polygon * [1, -1]) + (sx, sy)
+
+    commands = []
+    command = 'M'
     
-    ctx.set_line_width(0.1*scl)
-    ctx.new_path()
-    ctx.move_to(*polygon[0])
-    
-    for p in polygon[1:]:
-        ctx.line_to(*p)
+    for x, y in polygon:
+        commands.append('{} {:.4f} {:.4f}'.format(command, x, y))
+        command = 'L'
 
-    ctx.close_path()
+    commands.append('Z')
 
-    ctx.stroke()
+    path_data = ' '.join(commands)
 
-    ctx.show_page()
+    with open(filename, 'w') as ostr:
 
-    surface.flush()
-    surface.finish()
+        ostr.write('<?xml version="1.0" encoding="utf-8"?>\n')
+        ostr.write('<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{}mm" height="{}mm" viewBox="0 0 {} {}">\n'.format(
+            w, h, w, h))
+        ostr.write('<path d="{}" style="fill:none;stroke:#000000;stroke-width:0.05mm" />\n'.format(path_data));
+        ostr.write('</svg>\n')
 
     print('wrote', filename)
-    
 
 ######################################################################
 # make inset polygon by insetting trimmed polygon
@@ -810,10 +812,10 @@ def main():
 
     sx, sy = contour.max(axis=0) + max(BBOX_MARGIN, opts.rim_width)
 
-    pdf_filename = 'foo.pdf'
+    svg_filename = 'foo.svg'
     stl_filename = 'foo.stl'
 
-    dump_pdf(pdf_filename, sx, sy, trimmed_coords)
+    dump_svg(svg_filename, sx, sy, trimmed_coords)
 
     inset_coords, inset_polygon = make_inset_polygon(trimmed_polygon,
                                                      opts.rim_width)

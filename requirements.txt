@@ -2,4 +2,3 @@ svgelements == 1.4.2
 shapely == 1.7.1
 triangle == 20200424
 matplotlib == 3.3.3
-pycairo == 1.20.0
