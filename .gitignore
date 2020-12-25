@@ -1,4 +1,6 @@
 __pycache__
 *~
 .DS_Store
-/cutout_tool_env
+/venv
+/*.stl
+/*.pdf
