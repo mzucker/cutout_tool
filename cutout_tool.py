@@ -2,6 +2,7 @@ import sys
 import os
 import argparse
 import re
+from collections import defaultdict
 
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
@@ -119,6 +120,78 @@ def parse_cmdline():
 def points_close(p1, p2):
     return np.abs(p2-p1).max() < EPS
 
+
+######################################################################
+# join disjoint subpaths
+
+def join_subpaths(contours):
+
+    vertices = []
+    connections = []
+
+    for cidx, (contour, is_closed) in enumerate(contours):
+
+        if is_closed:
+            print('warning: ignoring unclosed sub-paths')
+            return contour
+
+        for which_end in [0, 1]:
+
+            v_new = contour[-which_end]
+            new_idx = -1
+
+            for vidx, v_old in enumerate(vertices):
+                if points_close(v_new, v_old):
+                    new_idx = vidx
+                    break
+
+            if new_idx == -1:
+                new_idx = len(vertices)
+                vertices.append(v_new)
+                connections.append([])
+
+            connections[new_idx].append((cidx, which_end))
+
+    sequence = -np.ones((len(contours), 2, 2), dtype=int)
+
+    for cinfo in connections:
+        if len(cinfo) != 2:
+            raise RuntimeError('subpaths do not form simple chain')
+        cidx0, end0 = cinfo[0]
+        cidx1, end1 = cinfo[1]
+        sequence[cidx0, end0] = (cidx1, end1)
+        sequence[cidx1, end1] = (cidx0, end0)
+        
+    if np.any(sequence == -1):
+        raise RuntimeError('subpaths do not form simple chain')
+
+    mega_contour = []
+
+    cur_contour = 0
+    cur_start = 0
+
+    for cidx in range(len(contours)):
+
+        c = contours[cur_contour][0]
+
+        next_contour, next_start = sequence[cur_contour, 1-cur_start]
+
+        assert np.all(sequence[next_contour, next_start] ==
+                      [cur_contour, 1-cur_start])
+        
+        if cur_start == 1:
+            c = contours[::-1]
+
+        if len(mega_contour):
+            assert points_close(mega_contour[-1][-1], c[0])
+
+        mega_contour.append(c[1:])
+
+        cur_contour = next_contour
+        cur_start = next_start
+
+    return np.vstack(tuple(mega_contour))
+
 ######################################################################
 # get a single path from a SVG file
 
@@ -151,7 +224,8 @@ def get_path(svgfile):
     for segment in segments:
         if isinstance(segment, svgelements.Move):
             if cur_contour is not None:
-                raise RuntimeError('Move without previous Close!')
+                contours.append((np.array(cur_contour), False))
+                cur_contour = None
             cur_move = [ np.array(segment.end) ]
         elif isinstance(segment, svgelements.Line):
             if cur_contour is None and cur_move is None:
@@ -166,18 +240,37 @@ def get_path(svgfile):
                 raise RuntimeError('Close without previous Line!')
             assert points_close(np.array(segment.start), cur_contour[-1])
             assert points_close(np.array(segment.end), cur_contour[0])
-            contours.append(np.array(cur_contour))
+            contours.append((np.array(cur_contour), True))
             cur_contour = None
             cur_move = None
         else:
             raise RuntimeError('invalid svg - not a simple polygon path!')
 
-    for contour in contours:
-        mid = 0.5*(contour.max(axis=0) + contour.min(axis=0))
-        contour -= mid
-        contour *= [1.0, -1.0]
+    if cur_contour is not None:
+        contours.append((np.array(cur_contour), False))
 
-    return contours
+    if not contours:
+        raise RuntimeError('empty path!')
+
+    if len(contours) > 1:
+
+        contour = join_subpaths(contours)
+
+    else:
+        
+        contour, is_closed = contours[0]
+    
+        if not is_closed:
+            raise RuntimeError('contour is not closed')
+
+    mid = 0.5*(contour.max(axis=0) + contour.min(axis=0))
+    contour -= mid
+    contour *= [1.0, -1.0]
+
+    if not sgeom.LinearRing(contour).is_ccw:
+        contour = contour[::-1]
+
+    return contour
 
 ######################################################################
 # get a shape to remove the cutter from inside corners
@@ -371,12 +464,17 @@ def cleanup_small_edges(polygon):
 
 def plot_polygon(polygon, *args, **kwargs):
 
-    if isinstance(polygon, sgeom.Polygon):
-        polygon = get_coords_as_array(polygon)
+    if isinstance(polygon, np.ndarray):
+        polygons = polygon
+    elif isinstance(polygon, sgeom.Polygon):
+        polygons = [get_coords_as_array(polygon)]
+    elif isinstance(polygon, sgeom.MultiPolygon):
+        polygons = [ get_coords_as_array(g) for g in polygon.geoms ]
 
-    idx = np.arange(len(polygon)+1)
-    idx[-1] = 0
-    plt.plot(polygon[idx,0], polygon[idx,1], *args, **kwargs)
+    for polygon in polygons:
+        idx = np.arange(len(polygon)+1)
+        idx[-1] = 0
+        plt.plot(polygon[idx,0], polygon[idx,1], *args, **kwargs)
 
 ######################################################################
 # compute triangle normals
@@ -554,6 +652,9 @@ def make_trimmed_polygon(contour, cutting_polygons):
         trimmed_polygon = trimmed_polygon.difference(sgeom.Polygon(cutting_polygon))
 
     if not isinstance(trimmed_polygon, sgeom.Polygon):
+        plot_polygon(trimmed_polygon)
+        plt.axis('equal')
+        plt.show()
         raise RuntimeError('result of cutout is not a simple polygon :(')
 
     trimmed_coords = get_coords_as_array(trimmed_polygon)
@@ -708,13 +809,10 @@ def main():
 
     opts = parse_cmdline()
 
-    contours = get_path(opts.svgfile)
-    if len(contours) > 1:
-        raise RuntimeError('complex polygons not supported yet!')
+    contour = get_path(opts.svgfile)
 
     cutter_profile = get_cutter_profile(opts)
-    
-    contour = contours[0]
+
 
     validate_polygon(contour)
 
