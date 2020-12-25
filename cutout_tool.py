@@ -98,7 +98,12 @@ def parse_cmdline():
                         default=DEFAULT_CUTTER_OVERLAP,
                         help='overlap of corner cuts (default {} mm)'.format(DEFAULT_CUTTER_OVERLAP))
 
-    return parser.parse_args()
+    opts = parser.parse_args()
+
+    if opts.rim_height <= opts.base_thickness:
+        raise RuntimeError('error: rim height must be >= base thickness')
+
+    return opts
 
 ######################################################################
 # check two points close enough
@@ -267,11 +272,18 @@ def get_cutter_profile(opts):
     r = 0.5*opts.cutter_diameter
     o = opts.cutter_overlap
 
+    h = opts.rim_height
+    
+    if h >= r:
+        d = r
+    else:
+        d = np.sqrt(r**2 - (r-h)**2)
+
     cutter_profile = np.array([
         [0, 0],
-        [r, 0],
-        [r, t],
-        [-r, t]
+        [d+o, 0],
+        [d+o, t],
+        [0, t]
     ])
 
     return cutter_profile
@@ -736,7 +748,7 @@ def make_mesh(vertices, triangles, attributes, t, h):
 
     v0 = np.hstack((vertices, 0*ones))
     v1 = np.hstack((vertices, t*ones))
-    v2 = np.hstack((vertices, (t+h)*ones))
+    v2 = np.hstack((vertices, h*ones))
 
     v3d = np.vstack((v0, v1, v2))
     
