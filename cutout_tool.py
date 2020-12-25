@@ -18,7 +18,6 @@ import numpy as np
 BBOX_MARGIN = 5.0 #mm
 
 DEFAULT_CUTTER_DIAMETER = 45.0 # mm
-DEFAULT_CUTTER_ANGLE = 90.0 # deg
 DEFAULT_CUTTER_THICKNESS = 0.5 # mm
 DEFAULT_CUTTER_OVERLAP = 0.5 # mm
 
@@ -65,15 +64,6 @@ def length(lstr):
 
     return mm
 
-######################################################################
-# parse an angle from the command line
-
-def angle(astr):
-    a = float(astr)
-    if a < 30.0 or a > 180.0:
-        raise ValueError('angle must be between 0 and 180 degrees!')
-    return a
-
 ######################################################################    
 # parse all of the command line options
 
@@ -100,14 +90,10 @@ def parse_cmdline():
                         default=DEFAULT_CUTTER_DIAMETER,
                         help='diameter of cutter (default {} mm)'.format(DEFAULT_CUTTER_DIAMETER))
 
-    parser.add_argument('--cutter-bevel-angle', '-a', metavar='ANGLE', type=angle,
-                        default=DEFAULT_CUTTER_ANGLE,
-                        help='bevel angle of cutter (default {} deg)'.format(DEFAULT_CUTTER_ANGLE))
-
     parser.add_argument('--cutter-thickness', '-c', metavar='LENGTH', type=length,
                         default=DEFAULT_CUTTER_THICKNESS,
                         help='thickness of cutter (default {} mm)'.format(DEFAULT_CUTTER_THICKNESS))
-
+    
     parser.add_argument('--cutter-overlap', '-o', metavar='LENGTH', type=length,
                         default=DEFAULT_CUTTER_OVERLAP,
                         help='overlap of corner cuts (default {} mm)'.format(DEFAULT_CUTTER_OVERLAP))
@@ -281,27 +267,12 @@ def get_cutter_profile(opts):
     r = 0.5*opts.cutter_diameter
     o = opts.cutter_overlap
 
-    if opts.cutter_bevel_angle == 180.0:
-        cutter_profile = np.array([
-            [0, 0],
-            [r, 0],
-            [r, t],
-            [-r, t]
-        ])
-    else:
-        slope = np.tan(0.5*opts.cutter_bevel_angle*np.pi/180)
-        dx = 0.5*t/slope
-        # TODO: bump out r by dx?
-        if dx >= r+o:
-            raise RuntimeError('invalid cutter path - try reducing bevel angle or increasing diameter?')
-        else:
-            cutter_profile = np.array([
-                [0, 0],
-                [r-dx+o, 0],
-                [r+o, 0.5*t],
-                [r-dx+o, t],
-                [0, t]
-            ])
+    cutter_profile = np.array([
+        [0, 0],
+        [r, 0],
+        [r, t],
+        [-r, t]
+    ])
 
     return cutter_profile
 
@@ -689,7 +660,11 @@ def dump_pdf(filename, sx, sy, polygon):
     ctx.close_path()
 
     ctx.stroke()
-    
+
+    ctx.show_page()
+
+    surface.flush()
+    surface.finish()
 
     print('wrote', filename)
     
