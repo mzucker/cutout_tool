@@ -24,12 +24,14 @@ DEFAULT_BASE_THICKNESS = 2.0 # mm
 DEFAULT_RIM_WIDTH = 5.0 # mm
 DEFAULT_RIM_HEIGHT = 5.0 # mm
 
+INCH = 25.4
+
 UNITS = dict(mm=1.0,
              cm=10.0,
-             pt=25.4/72,
-             px=25.4/96)
+             pt=INCH/72,
+             px=INCH/96)
 
-UNITS['in'] = 25.4
+UNITS['in'] = INCH
 
 UNIT_REGEXP = re.compile(r'^([0-9]+(\.[0-9]*)?)\s*([a-z][a-z])?$')
 
@@ -293,7 +295,7 @@ def get_cutter_profile(opts):
 def is_convex(pA, pB, pC):
     x0, y0 = pB-pA
     x1, y1 = pC-pA
-    return x0*y1 - x1*y0 < 0
+    return x0*y1 - x1*y0 > 0
 
 ######################################################################
 # make sure that polygon has no small edges
@@ -319,8 +321,8 @@ def make_cutting_polygon(cutter_profile, p0, p1):
     tx, ty = tangent
     normal = np.array([-ty, tx])
 
-    R0 = np.array([-tangent, normal])
-    R1 = np.array([tangent, normal])
+    R0 = np.array([-tangent, -normal])
+    R1 = np.array([tangent, -normal])
 
     c0 = np.dot(cutter_profile, R0) + p0
     c1 = np.dot(cutter_profile, R1) + p1
@@ -339,18 +341,17 @@ def get_cutting_polygons(contour, cutter_profile):
 
     cutting_polygons = []
 
-    edges = np.zeros(len(contour), dtype=bool)
+    corners = np.zeros(len(contour), dtype=bool)
 
     for idx, pC in enumerate(contour):
         pA = contour[idx-2]
         pB = contour[idx-1]
         if not is_convex(pA, pB, pC):
-            edges[idx] = True
-            edges[idx-1] = True
+            corners[idx-1] = True
 
     for idx, pB in enumerate(contour):
         pA = contour[idx-1]
-        if edges[idx]:
+        if corners[idx] or corners[idx-1]:
             cutting_polygons.append(make_cutting_polygon(cutter_profile, pA, pB))
         
     return cutting_polygons
@@ -447,7 +448,7 @@ def cleanup_small_edges(polygon):
 def plot_polygon(polygon, *args, **kwargs):
 
     if isinstance(polygon, np.ndarray):
-        polygons = polygon
+        polygons = [polygon]
     elif isinstance(polygon, sgeom.Polygon):
         polygons = [get_coords_as_array(polygon)]
     elif isinstance(polygon, sgeom.MultiPolygon):
@@ -800,17 +801,16 @@ def main():
 
     contour = get_path(opts.svgfile)
 
-    cutter_profile = get_cutter_profile(opts)
-
+    sx, sy = contour.max(axis=0) + max(BBOX_MARGIN, opts.rim_width)
 
     validate_polygon(contour)
+
+    cutter_profile = get_cutter_profile(opts)
 
     cutting_polygons = get_cutting_polygons(contour, cutter_profile)
 
     trimmed_coords, trimmed_polygon = make_trimmed_polygon(contour, 
                                                            cutting_polygons)
-
-    sx, sy = contour.max(axis=0) + max(BBOX_MARGIN, opts.rim_width)
 
     svg_filename = 'foo.svg'
     stl_filename = 'foo.stl'
